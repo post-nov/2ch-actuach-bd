@@ -4,7 +4,11 @@ import re
 import json
 import os
 from datetime import datetime
+import psycopg2
 
+DB_NAME = "2ch_posts"
+DB_USER = "postgres"
+DB_PASSWORD = "password"
 
 def get_list_of_threads(num=-1):
     data = requests.get('https://2ch.hk/b/catalog.json').json()
@@ -63,51 +67,58 @@ def content_of_thread(op_number):
 
     return dict_of_posts
 
+class DB():
+
+    def __init__(self):
+        self.conn = psycopg2.connect(f"dbname={DB_NAME} user={DB_USER} password={DB_PASSWORD}")
+        self.cur = self.conn.cursor()
+
+    def pass_params(self, dict_values):
+        content_db = dict_values['content']
+        date_db = dict_values['date']
+        notions_db = dict_values['notions']
+        is_op_db = dict_values['is_op']
+        link_db = dict_values['link']
+
+        self.cur.execute(f"""
+            INSERT INTO posts (content, date, notions, is_op, link) 
+            VALUES ('{content_db}', '{date_db}', '{notions_db}', '{is_op_db}', '{link_db}')
+            """)
+        self.conn.commit()
+
+    def count_posts(self):
+        self.cur.execute("SELECT COUNT(*) FROM posts")
+        return self.cur.fetchone()
+
+    def close(self):
+        self.cur.close()
+        self.conn.close()    
+
 
 def get_cool_posts(list_of_threads, amount=None):
     if amount == None:
         amount = (len(list_of_threads))
-    cool_posts = {}
+
+    postgres = DB()
+
     for op_num in range(amount):
         try:
             thread = content_of_thread(list_of_threads[op_num])
             for post, value in thread.items():
                 if value['notions'] > 4:
-                    cool_posts[post] = thread[post]
+                    params = thread[post]
+                    postgres.pass_params(params)
             print('Processed: ', op_num+1, '/', amount, sep='')
         except:
-            print('Failed at', f'https://2ch.hk/b/res/{op_num}.html')
-    print('Finished. Number of posts:',
-          len(cool_posts), '\n------------------------\n')
-    return cool_posts
-
-
-def show_tooked(posts):
-    for post, value in posts.items():
-        print(f'Актуальный пост №{post}:', end='')
-        if not value['is_op']:
-            print('(Пост крутой, а не ОПычный)')
-        print('\n\n', value['content'], sep='', end='')
-        print('\n\n\nБыл упомянут', value['notions'],
-              'раз(а). Отправлен', value['date'])
-        print('Ссылка:\n', value['link'], sep='')
-        print('*********************************\n')
+            print('Failed at', f'https://2ch.hk/b/res/{list_of_threads[op_num]}.html')
+    postgres.close()
 
 
 if __name__ == '__main__':
 
     list_of_threads = get_list_of_threads()
     x = get_cool_posts(list_of_threads)
-    # show_tooked(x)
 
-    try:
-        with open('thread_dump.json', 'r') as json_file:
-            j = json.load(json_file)
-    except:
-        j = {}
-        for key, value in x.items():
-            j[key] = value
-
-
-    with open('thread_dump.json', 'w') as json_file:
-        json.dump(j, json_file)
+    test = DB()
+    print(test.count_posts()[0])
+    test.close()
